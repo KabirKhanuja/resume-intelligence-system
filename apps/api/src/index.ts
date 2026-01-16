@@ -7,6 +7,9 @@ app.get("/health", (_, res) => {
     res.json({ status: "ok" });
 });
 
-app.listen(4000, () => {
+const server = app.listen(4000, () => {
     console.log("API running on http://localhost:4000");
 });
+
+
+
