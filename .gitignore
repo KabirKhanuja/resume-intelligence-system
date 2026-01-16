@@ -1,0 +1,3 @@
+# Dependencies (any folder depth)
+node_modules/
+**/node_modules/

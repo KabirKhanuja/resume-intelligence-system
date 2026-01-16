@@ -1,0 +1,30 @@
+{
+  "name": "resume-intelligence-system",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "packageManager": "npm@10.9.4",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KabirKhanuja/resume-intelligence-system.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/KabirKhanuja/resume-intelligence-system/issues"
+  },
+  "homepage": "https://github.com/KabirKhanuja/resume-intelligence-system#readme",
+  "devDependencies": {
+    "turbo": "^2.7.4"
+  }
+}
