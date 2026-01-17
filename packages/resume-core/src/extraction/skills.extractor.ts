@@ -1,10 +1,7 @@
 import type { RawSection } from "../schema/resume.schema.ts";
 import type { Skill } from "../schema/resume.schema.ts";
 
-/**
- * Very lightweight skill vocabulary.
- * Can be extended safely over time.
- */
+
 const KNOWN_SKILLS = new Set([
     // programming
     "python", "java", "c", "c++", "javascript", "typescript",
@@ -25,9 +22,6 @@ const KNOWN_SKILLS = new Set([
     "aws", "azure", "gcp"
 ]);
 
-/**
- * Extracts skills from detected resume sections.
- */
 export function extractSkills(sections: RawSection[]): Skill[] {
     const skillMap = new Map<string, Skill>();
 

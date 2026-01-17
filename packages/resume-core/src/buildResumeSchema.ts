@@ -1,5 +1,6 @@
 import { detectSections } from "./section-detection/detectSection.js";
 import { extractSkills } from "./extraction/skills.extractor.js";
+import { extractProjects } from "./extraction/projects.extractor.js";
 
 import type {
     ResumeSchema,
@@ -14,6 +15,7 @@ export function buildResumeSchema(
 
     const rawSections = detectSections(rawText);
     const skills = extractSkills(rawSections);
+    const projects = extractProjects(rawSections);
 
     const confidence =
         rawSections.length === 0
@@ -40,7 +42,7 @@ export function buildResumeSchema(
         meta: fullMeta,
 
         skills,
-        projects: [],
+        projects,
         experience: [],
         education: [],
         certifications: [],
