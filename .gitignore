@@ -26,6 +26,16 @@ apps/api/src/*.js.map
 apps/api/src/*.d.ts
 apps/api/src/*.d.ts.map
 
+# Prisma config build artifacts (should not be committed)
+apps/api/prisma.config.js
+apps/api/prisma.config.js.map
+apps/api/prisma.config.d.ts
+apps/api/prisma.config.d.ts.map
+
+# NPM workspaces should only use the root lockfile
+apps/*/package-lock.json
+packages/*/package-lock.json
+
 # Prisma local databases
 apps/api/prisma/*.db
 apps/api/prisma/*.db-journal

@@ -5,25 +5,25 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/index.ts",
+    "dev": "node scripts/dev.mjs",
     "build": "tsc"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@libsql/client": "^0.17.0",
+    "@prisma/adapter-libsql": "^7.3.0",
     "@prisma/client": "^7.3.0",
     "cors": "^2.8.5",
     "express": "^5.2.1",
-    "multer": "^2.0.2",
-    "prisma": "^7.3.0"
+    "multer": "^2.0.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.9",
     "nodemon": "^3.1.11",
-    "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
+    "prisma": "^7.3.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }

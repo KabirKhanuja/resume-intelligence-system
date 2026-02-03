@@ -17,4 +17,7 @@ model Resume {
   embedding    Json?
 
   createdAt    DateTime @default(now())
+
+  @@index([batch, department])
+  @@index([score])
 }
