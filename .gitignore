@@ -1,3 +1,36 @@
 # Dependencies (any folder depth)
 node_modules/
 **/node_modules/
+
+# Turbo (any folder depth)
+.turbo/
+**/.turbo/
+
+# Build outputs (any folder depth)
+dist/
+**/dist/
+build/
+**/build/
+out/
+**/out/
+.next/
+**/.next/
+
+# Generated logs
+turbo-build.log
+**/turbo-build.log
+
+# API build outputs accidentally emitted into src/
+apps/api/src/*.js
+apps/api/src/*.js.map
+apps/api/src/*.d.ts
+apps/api/src/*.d.ts.map
+
+# Misc
+.DS_Store
+.env
+.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
