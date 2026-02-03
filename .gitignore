@@ -42,6 +42,10 @@ apps/api/prisma/*.db-journal
 apps/api/prisma/*.sqlite
 apps/api/prisma/*.sqlite-journal
 
+
+#for testing 
+scripts/seed-resumes.ts
+
 # Misc
 .DS_Store
 .env
@@ -50,3 +54,4 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+

@@ -2,18 +2,18 @@
   "name": "resume-core",
   "version": "1.0.0",
   "type": "module",
-  "description": "Core resume parsing and intelligence logic",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
+  "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch"
+    "build": "tsc"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
