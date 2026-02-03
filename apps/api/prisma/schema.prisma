@@ -1,0 +1,20 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Resume {
+  id           String   @id
+  studentId    String?
+  batch        String?
+  department   String?
+
+  schema       Json
+  score        Int
+  embedding    Json?
+
+  createdAt    DateTime @default(now())
+}

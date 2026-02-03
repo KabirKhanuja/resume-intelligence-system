@@ -12,9 +12,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@prisma/client": "^7.3.0",
     "cors": "^2.8.5",
     "express": "^5.2.1",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "prisma": "^7.3.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
