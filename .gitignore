@@ -26,6 +26,12 @@ apps/api/src/*.js.map
 apps/api/src/*.d.ts
 apps/api/src/*.d.ts.map
 
+# Prisma local databases
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+apps/api/prisma/*.sqlite
+apps/api/prisma/*.sqlite-journal
+
 # Misc
 .DS_Store
 .env
