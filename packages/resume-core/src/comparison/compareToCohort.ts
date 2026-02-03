@@ -28,7 +28,7 @@ export function compareToCohort(
 ): CohortComparisonResult {
   const total = cohort.length;
 
-  // ---- Ranking (by total score or proxy) ----
+  // ranking
   const scored = cohort.map(r => ({
     resumeId: r.meta.resumeId,
     score:
@@ -45,13 +45,13 @@ export function compareToCohort(
   const percentile =
     Math.round(((total - rank) / total) * 100);
 
-  // ---- Averages ----
+  // avgs
   const avgSkills = average(cohort.map(r => r.skills.length));
   const avgProjects = average(cohort.map(r => r.projects.length));
   const avgExperience = average(cohort.map(r => r.experience.length));
 
-  // ---- Common skill gap detection ----
-  const commonSkills = findCommonSkills(cohort, 0.4); // 40% threshold
+  // gap detection
+  const commonSkills = findCommonSkills(cohort, 0.4); // 40% isd the threshold
   const studentSkillSet = new Set(student.skills.map(s => s.name));
 
   const missingCommon = commonSkills.filter(
