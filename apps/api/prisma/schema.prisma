@@ -7,17 +7,23 @@ datasource db {
 }
 
 model Resume {
-  id           String   @id
-  studentId    String?
-  batch        String?
-  department   String?
+  id                 String   @id
+  studentId          String?
+  batch              String?
+  department         String?
 
-  schema       Json
-  score        Int
-  embedding    Json?
+  schema             Json
+  score              Int
 
-  createdAt    DateTime @default(now())
+  embedding           Json?
+  embeddingModel      String?
+  embeddingStatus     String   @default("pending")
+  embeddingError      String?
+  embeddingUpdatedAt  DateTime?
 
+  createdAt          DateTime @default(now())
+
+  @@index([embeddingStatus])
   @@index([batch, department])
   @@index([score])
 }
