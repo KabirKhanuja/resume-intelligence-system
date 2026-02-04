@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "node scripts/dev.mjs",
     "build": "turbo run build"
   },
   "repository": {
@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/KabirKhanuja/resume-intelligence-system#readme",
   "devDependencies": {
+    "@types/multer": "^2.0.0",
     "turbo": "^2.7.4"
   }
 }
