@@ -51,3 +51,14 @@ model Job {
   @@index([status, runAt])
   @@index([type, status, runAt])
 }
+
+model LlmRequestLog {
+  id        String   @id @default(cuid())
+  studentId String
+  resumeId  String?
+  endpoint  String
+  model     String?
+  createdAt DateTime @default(now())
+
+  @@index([studentId, createdAt])
+}
