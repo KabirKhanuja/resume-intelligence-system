@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 
 import { buildResumeSchema, scoreResume } from "resume-core";
 import { extractTextFromUpload } from "../services/extractText.js";
+import { enqueueResumeEmbeddingJob } from "../services/jobQueue.js";
 
 export function registerResumeRoutes(app: Router): void {
   const upload = multer({
@@ -32,13 +33,12 @@ export function registerResumeRoutes(app: Router): void {
       },
     });
 
+    await enqueueResumeEmbeddingJob(saved.id);
+
     res.json(saved);
   });
 
-  // PDF/DOCX upload -> text extraction -> parse
-  // multipart/form-data:
-  // - file: (pdf/docx/txt)
-  // - meta: optional JSON string
+
   app.post("/resume/upload", upload.single("file"), async (req, res) => {
     const file = req.file;
     if (!file) return res.status(400).json({ error: "file required" });
@@ -83,6 +83,8 @@ export function registerResumeRoutes(app: Router): void {
         score,
       },
     });
+
+    await enqueueResumeEmbeddingJob(saved.id);
 
     res.json({
       ...saved,

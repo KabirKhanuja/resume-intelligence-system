@@ -27,3 +27,27 @@ model Resume {
   @@index([batch, department])
   @@index([score])
 }
+
+model Job {
+  id           String   @id @default(cuid())
+  type         String
+  dedupeKey    String?  @unique
+
+  payload      Json
+
+  status       String   @default("queued") // queued | running | done | failed
+  priority     Int      @default(0)
+  attempts     Int      @default(0)
+  maxAttempts  Int      @default(5)
+  runAt        DateTime @default(now())
+
+  lockedAt     DateTime?
+  lockedBy     String?
+  lastError    String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status, runAt])
+  @@index([type, status, runAt])
+}

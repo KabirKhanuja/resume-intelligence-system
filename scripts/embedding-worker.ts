@@ -5,13 +5,18 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 
 const BATCH_SIZE = 5;
 const SLEEP_MS = 2000;
 const EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2";
 const IDLE_LOG_EVERY_MS = 15_000;
 
+const JOB_TYPE = "resume_embedding";
+const WORKER_ID = process.env.WORKER_ID ?? randomUUID();
+
 const watchMode = process.argv.includes("--watch");
+const backfillMode = process.argv.includes("--backfill");
 
 const embeddingsBaseUrl =
   process.env.RESUME_EMBEDDINGS_URL ??
@@ -124,110 +129,225 @@ function looksLikeEmbeddingsServerDown(err: unknown): boolean {
   );
 }
 
-async function processBatch() {
+function backoffMs(attempts: number): number {
+  return Math.min(60_000, Math.max(1000, 2 ** Math.min(attempts, 10) * 1000));
+}
+
+async function enqueueMissingEmbeddingJobs(): Promise<number> {
   const pending = await prisma.resume.findMany({
     where: { embeddingStatus: "pending" },
-    take: BATCH_SIZE,
-    orderBy: { createdAt: "asc" },
+    select: { id: true },
   });
+  if (pending.length === 0) return 0;
 
-  if (pending.length === 0) {
-    return 0;
+  const now = new Date();
+  let touched = 0;
+  for (const r of pending) {
+    const dedupeKey = `${JOB_TYPE}:${r.id}`;
+    await prisma.job.upsert({
+      where: { dedupeKey },
+      create: {
+        type: JOB_TYPE,
+        dedupeKey,
+        payload: { resumeId: r.id },
+        status: "queued",
+        runAt: now,
+        priority: 0,
+        attempts: 0,
+        maxAttempts: 5,
+      },
+      update: {
+        status: "queued",
+        runAt: now,
+        lockedAt: null,
+        lockedBy: null,
+      },
+    });
+    touched += 1;
   }
 
-  // this will only start the embeddings server when there is work to do
+  return touched;
+}
+
+async function claimNextJob() {
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const job = await tx.job.findFirst({
+      where: {
+        type: JOB_TYPE,
+        status: "queued",
+        runAt: { lte: now },
+      },
+      orderBy: [{ priority: "desc" }, { runAt: "asc" }, { createdAt: "asc" }],
+    });
+
+    if (!job) return null;
+
+    const locked = await tx.job.updateMany({
+      where: { id: job.id, status: "queued" },
+      data: {
+        status: "running",
+        lockedAt: new Date(),
+        lockedBy: WORKER_ID,
+      },
+    });
+
+    if (locked.count === 0) return null;
+    return tx.job.findUnique({ where: { id: job.id } });
+  });
+}
+
+async function processOneJob(): Promise<boolean> {
+  const job = await claimNextJob();
+  if (!job) return false;
+
+  const resumeId = (job.payload as any)?.resumeId as string | undefined;
+  if (!resumeId) {
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        status: "failed",
+        lastError: "Invalid job payload: missing resumeId",
+      },
+    });
+    return true;
+  }
+
+  // Start embeddings server only when there is work to do
   await ensureEmbeddingsServer();
 
-  for (const resume of pending) {
+  try {
+    const resume = await prisma.resume.findUnique({ where: { id: resumeId } });
+    if (!resume) {
+      await prisma.job.update({
+        where: { id: job.id },
+        data: { status: "done", lastError: "Resume not found; nothing to do" },
+      });
+      return true;
+    }
+
+    const schema = resume.schema as unknown as ResumeSchema;
+    const text = buildResumeEmbeddingText(schema);
+
+    let embedding: number[];
     try {
-      const schema = resume.schema as unknown as ResumeSchema;
-      const text = buildResumeEmbeddingText(schema);
-
-      let embedding: number[];
-      try {
+      embedding = await embedText(text);
+    } catch (err) {
+      if (looksLikeEmbeddingsServerDown(err)) {
+        await ensureEmbeddingsServer();
         embedding = await embedText(text);
-      } catch (err) {
-        if (looksLikeEmbeddingsServerDown(err)) {
-          await ensureEmbeddingsServer();
-          embedding = await embedText(text);
-        } else {
-          throw err;
-        }
+      } else {
+        throw err;
       }
+    }
 
-      await prisma.resume.update({
-        where: { id: resume.id },
+    await prisma.resume.update({
+      where: { id: resume.id },
+      data: {
+        embedding,
+        embeddingModel: EMBEDDING_MODEL,
+        embeddingStatus: "done",
+        embeddingError: null,
+        embeddingUpdatedAt: new Date(),
+      },
+    });
+
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        status: "done",
+        lockedAt: null,
+        lockedBy: null,
+        lastError: null,
+      },
+    });
+
+    console.log(`Embedded resume ${resume.id} (job ${job.id})`);
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown embedding error";
+    const nextAttempts = job.attempts + 1;
+    const transient = looksLikeEmbeddingsServerDown(err);
+
+    if (nextAttempts >= job.maxAttempts) {
+      await prisma.job.update({
+        where: { id: job.id },
         data: {
-          embedding,
-          embeddingModel: EMBEDDING_MODEL,
-          embeddingStatus: "done",
-          embeddingError: null,
-          embeddingUpdatedAt: new Date(),
+          status: "failed",
+          attempts: nextAttempts,
+          lockedAt: null,
+          lockedBy: null,
+          lastError: message.slice(0, 1000),
         },
       });
 
-      console.log(`Embedded resume ${resume.id}`);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Unknown embedding error";
-
-      // if the server is down it won't mark items as permanently failed
-      if (looksLikeEmbeddingsServerDown(err)) {
-        console.error(`Embeddings server unavailable while embedding ${resume.id}. Will retry.`);
-        console.error(message);
-        await prisma.resume.update({
-          where: { id: resume.id },
-          data: {
-            embeddingStatus: "pending",
-            embeddingError: message.slice(0, 1000),
-          },
-        });
-        // itll bail out of this batch so we don't spam the DB with the same error
-        return pending.length;
-      }
-
-      await prisma.resume.update({
-        where: { id: resume.id },
+      await prisma.resume.updateMany({
+        where: { id: resumeId },
         data: {
           embeddingStatus: "failed",
           embeddingError: message.slice(0, 1000),
         },
       });
 
-      console.error(`Failed to embed resume ${resume.id}`);
+      console.error(`Failed to embed resume ${resumeId} after ${nextAttempts} attempts (job ${job.id})`);
       console.error(message);
+      return true;
     }
-  }
 
-  return pending.length;
+    const delay = transient ? 5_000 : backoffMs(nextAttempts);
+    await prisma.job.update({
+      where: { id: job.id },
+      data: {
+        status: "queued",
+        attempts: nextAttempts,
+        runAt: new Date(Date.now() + delay),
+        lockedAt: null,
+        lockedBy: null,
+        lastError: message.slice(0, 1000),
+      },
+    });
+
+    // keeping resume pending while we retry
+    await prisma.resume.updateMany({
+      where: { id: resumeId },
+      data: {
+        embeddingStatus: "pending",
+        embeddingError: message.slice(0, 1000),
+      },
+    });
+
+    console.error(`Job ${job.id} failed (attempt ${nextAttempts}/${job.maxAttempts}). Retrying in ${Math.round(delay / 1000)}s.`);
+    console.error(message);
+    return true;
+  }
 }
 
 async function run() {
   console.log("Embedding worker started");
 
-  // if the previous run marked some resumes failed due to the server being down
-  // we would reset them back to pending so they can be retried
-  await prisma.resume.updateMany({
-    where: {
-      embeddingStatus: "failed",
-      embeddingError: {
-        contains: "failed to reach embeddings server",
-      },
-    },
-    data: {
-      embeddingStatus: "pending",
-    },
-  });
+  if (backfillMode) {
+    const created = await enqueueMissingEmbeddingJobs();
+    console.log(`Backfill: created ${created} embedding job(s)`);
+    if (!watchMode) {
+      console.log("Backfill complete. Exiting.");
+      return;
+    }
+  }
 
   let lastIdleLog = 0;
 
   while (true) {
     try {
-      const processed = await processBatch();
+      let processedAny = false;
+      for (let i = 0; i < BATCH_SIZE; i++) {
+        const did = await processOneJob();
+        if (!did) break;
+        processedAny = true;
+      }
 
-      if (processed === 0) {
+      if (!processedAny) {
         if (!watchMode) {
-          console.log("No pending resumes. Exiting.");
+          console.log("No queued jobs. Exiting.");
           return;
         }
 
