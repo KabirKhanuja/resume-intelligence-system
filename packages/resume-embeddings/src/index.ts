@@ -1,3 +1,3 @@
-export * from "./embedText.js";
-export * from "./similarity.js";
-export * from "./buildResumeEmbeddingText.js";
+export { embedText } from "./embedText.js";
+export { cosineSimilarity } from "./similarity.js";
+export { buildResumeEmbeddingText } from "./buildResumeEmbeddingText.js";

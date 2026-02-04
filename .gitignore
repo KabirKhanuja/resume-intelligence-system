@@ -42,9 +42,19 @@ apps/api/prisma/*.db-journal
 apps/api/prisma/*.sqlite
 apps/api/prisma/*.sqlite-journal
 
+# Python artifacts
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+**/.venv/
+venv/
+**/venv/
+
 
 #for testing 
 scripts/seed-resumes.ts
+packages/resume-embeddings/src/testEmbed.ts
 
 # Misc
 .DS_Store

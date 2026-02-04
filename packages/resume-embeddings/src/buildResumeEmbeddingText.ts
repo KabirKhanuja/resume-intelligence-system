@@ -1,13 +1,13 @@
 import type { ResumeSchema } from "resume-core";
 
-export function buildResumeEmbeddingText(resume: ResumeSchema): string {
+export function buildResumeEmbeddingText(schema: ResumeSchema): string {
+  const skills = schema.skills?.map(s => s.name).join(", ") ?? "";
+  const projects = schema.projects?.map(p => p.title).join(", ") ?? "";
+  const experience = schema.experience?.map(e => e.role).join(", ") ?? "";
+
   return `
-Skills: ${resume.skills.map(s => s.name).join(", ")}
-
-Projects:
-${resume.projects.map(p => `- ${p.description}`).join("\n")}
-
-Experience:
-${resume.experience.map(e => `- ${e.description}`).join("\n")}
+Skills: ${skills}
+Projects: ${projects}
+Experience: ${experience}
 `.trim();
 }
