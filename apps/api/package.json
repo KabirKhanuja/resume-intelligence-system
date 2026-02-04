@@ -17,11 +17,14 @@
     "@prisma/client": "^7.3.0",
     "cors": "^2.8.5",
     "express": "^5.2.1",
-    "multer": "^2.0.2"
+    "mammoth": "^1.11.0",
+    "multer": "^2.0.2",
+    "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.9",
+    "@types/pdf-parse": "^1.1.5",
     "nodemon": "^3.1.11",
     "prisma": "^7.3.0",
     "tsx": "^4.21.0",
