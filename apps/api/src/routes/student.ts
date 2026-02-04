@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Router } from "express";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../db.js";
@@ -15,7 +15,7 @@ import { toResumeSchema, toEmbedding } from "../services/guards.js";
 import { computeGapSummary, type GapSummary, type GapEvidence } from "../services/gaps.js";
 import { fallbackAdvice, summarizeGapsWithLLM } from "../services/llm.js";
 
-export function registerStudentRoutes(app: Express): void {
+export function registerStudentRoutes(app: Router): void {
   // student score
   app.post("/student/score", async (req, res) => {
     const { resumeId } = req.body as { resumeId?: string };

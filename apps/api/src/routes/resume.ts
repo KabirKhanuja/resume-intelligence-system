@@ -1,11 +1,11 @@
-import type { Express } from "express";
+import type { Router } from "express";
 import type { Prisma } from "@prisma/client";
 import multer from "multer";
 import { prisma } from "../db.js";
 
 import { buildResumeSchema, scoreResume } from "resume-core";
 
-export function registerResumeRoutes(app: Express): void {
+export function registerResumeRoutes(app: Router): void {
   const upload = multer();
 
   // resume parsing api

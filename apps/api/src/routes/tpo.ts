@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Router } from "express";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "../db.js";
@@ -6,7 +6,7 @@ import { prisma } from "../db.js";
 import { cosineSimilarity, embedText } from "resume-embeddings";
 import { toEmbedding } from "../services/guards.js";
 
-export function registerTpoRoutes(app: Express): void {
+export function registerTpoRoutes(app: Router): void {
   // for tpo shortlist
   app.post("/tpo/shortlist", async (req, res) => {
     const { jdText, topN = 10 } = req.body as { jdText?: string; topN?: number };
