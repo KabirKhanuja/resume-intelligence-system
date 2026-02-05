@@ -7,6 +7,13 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Briefcase, FileText, Search, Users, ChevronRight, CheckCircle2, User, ArrowLeft } from "lucide-react"
+import { postJson } from "@/lib/api"
+
+type ShortlistResult = {
+    resumeId: string
+    matchScore: number
+    baseScore: number
+}
 
 export default function ShortlistPage() {
     const [step, setStep] = useState<"input" | "processing" | "results">("input")
@@ -15,22 +22,27 @@ export default function ShortlistPage() {
     const [company, setCompany] = useState("")
     const [role, setRole] = useState("")
     const [jd, setJd] = useState("")
+    const [topN, setTopN] = useState(10)
+    const [results, setResults] = useState<ShortlistResult[]>([])
+    const [error, setError] = useState<string | null>(null)
 
-    // Mock Processing Animation
-    const handleShortlist = () => {
+    const handleShortlist = async () => {
         if (!company || !role || !jd) return
+        setError(null)
         setStep("processing")
-        setTimeout(() => setStep("results"), 2000)
+        try {
+            const res = await postJson<ShortlistResult[]>("/api/v1/tpo/shortlist", {
+                jdText: jd,
+                topN,
+            })
+            setResults(res)
+            setStep("results")
+        } catch (e) {
+            const message = e instanceof Error ? e.message : "Shortlisting failed"
+            setError(message)
+            setStep("input")
+        }
     }
-
-    // Mock Results
-    const results = [
-        { id: 1, name: "Student A", score: 95, match: "High", skills: ["React", "Node.js", "System Design"], experience: "2 Internships" },
-        { id: 2, name: "Student B", score: 88, match: "High", skills: ["Next.js", "TypeScript", "SQL"], experience: "1 Internship" },
-        { id: 3, name: "Student C", score: 82, match: "Medium", skills: ["JavaScript", "HTML/CSS"], experience: "Projects only" },
-        { id: 4, name: "Student D", score: 76, match: "Medium", skills: ["Python", "Flask"], experience: "1 Internship" },
-        { id: 5, name: "Student E", score: 65, match: "Low", skills: ["Java", "OOP"], experience: "None" },
-    ]
 
     if (step === "processing") {
         return (
@@ -60,14 +72,14 @@ export default function ShortlistPage() {
                         <p className="text-muted-foreground">{company} - {role}</p>
                     </div>
                     <div className="ml-auto flex items-center gap-2">
-                        <Badge variant="outline" className="h-8 px-3">Top 5 Matches</Badge>
-                        <Button>Save Shortlist</Button>
+                        <Badge variant="outline" className="h-8 px-3">Top {results.length} Matches</Badge>
+                        <Button disabled>Save Shortlist</Button>
                     </div>
                 </div>
 
                 <div className="grid gap-4">
                     {results.map((candidate, i) => (
-                        <Card key={candidate.id} className="flex flex-col md:flex-row items-center p-4 gap-4 bg-white border-slate-200 hover:border-blue-300 hover:shadow-md transition-all">
+                        <Card key={candidate.resumeId} className="flex flex-col md:flex-row items-center p-4 gap-4 bg-white border-slate-200 hover:border-blue-300 hover:shadow-md transition-all">
                             <div className="flex items-center gap-4 md:w-1/4">
                                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary font-bold text-sm text-secondary-foreground">
                                     #{i + 1}
@@ -76,26 +88,22 @@ export default function ShortlistPage() {
                                     <User className="h-5 w-5" />
                                 </div>
                                 <div>
-                                    <p className="font-semibold">{candidate.name}</p>
-                                    <p className="text-xs text-muted-foreground">ID: 2024-{100 + candidate.id}</p>
+                                    <p className="font-semibold">Resume</p>
+                                    <p className="text-xs text-muted-foreground truncate max-w-55">{candidate.resumeId}</p>
                                 </div>
                             </div>
 
                             <div className="md:w-1/4 space-y-1">
                                 <div className="flex justify-between text-xs font-medium">
                                     <span>Match Score</span>
-                                    <span className={candidate.score > 80 ? "text-emerald-600" : "text-amber-600"}>{candidate.score}%</span>
+                                    <span className={candidate.matchScore >= 0.75 ? "text-emerald-600" : "text-amber-600"}>{Math.round(candidate.matchScore * 100)}%</span>
                                 </div>
-                                <Progress value={candidate.score} className={candidate.score > 80 ? "[&>div]:bg-emerald-500" : "[&>div]:bg-amber-500"} />
+                                <Progress value={Math.round(candidate.matchScore * 100)} className={candidate.matchScore >= 0.75 ? "[&>div]:bg-emerald-500" : "[&>div]:bg-amber-500"} />
                             </div>
 
                             <div className="md:w-1/3 flex flex-wrap gap-2">
-                                {candidate.skills.map(skill => (
-                                    <Badge key={skill} variant="secondary" className="text-xs font-normal">
-                                        {skill}
-                                    </Badge>
-                                ))}
-                                <Badge variant="outline" className="text-xs font-normal">{candidate.experience}</Badge>
+                                <Badge variant="secondary" className="text-xs font-normal">Base score: {candidate.baseScore}</Badge>
+                                <Badge variant="outline" className="text-xs font-normal">Similarity: {candidate.matchScore.toFixed(4)}</Badge>
                             </div>
 
                             <div className="ml-auto">
@@ -105,6 +113,9 @@ export default function ShortlistPage() {
                             </div>
                         </Card>
                     ))}
+                    {results.length === 0 && (
+                        <p className="text-sm text-muted-foreground">No resumes available to shortlist (embeddings may still be processing).</p>
+                    )}
                 </div>
             </div>
         )
@@ -141,6 +152,17 @@ export default function ShortlistPage() {
                             />
                         </div>
                     </div>
+
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium">Number of candidates</label>
+                        <Input
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={topN}
+                            onChange={(e) => setTopN(Number(e.target.value) || 10)}
+                        />
+                    </div>
                 </CardContent>
             </Card>
 
@@ -158,7 +180,7 @@ export default function ShortlistPage() {
                 </CardHeader>
                 <CardContent>
                     <textarea
-                        className="flex min-h-[200px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex min-h-50 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                         placeholder="Paste JD content here..."
                         value={jd}
                         onChange={(e) => setJd(e.target.value)}
@@ -172,6 +194,10 @@ export default function ShortlistPage() {
                     Run Shortlist Algorithm
                 </Button>
             </div>
+
+            {error && (
+                <p className="text-sm text-red-600">{error}</p>
+            )}
         </div>
     )
 }

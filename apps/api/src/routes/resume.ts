@@ -6,6 +6,7 @@ import { prisma } from "../db.js";
 import { buildResumeSchema, scoreResume } from "resume-core";
 import { extractTextFromUpload } from "../services/extractText.js";
 import { enqueueResumeEmbeddingJob } from "../services/jobQueue.js";
+import { enhanceSchemaWithLLM } from "../services/resumeExtractor.js";
 
 export function registerResumeRoutes(app: Router): void {
   const upload = multer({
@@ -19,23 +20,55 @@ export function registerResumeRoutes(app: Router): void {
     const { text, meta } = req.body as { text?: string; meta?: any };
     if (!text) return res.status(400).json({ error: "resume text required" });
 
-    const schema = buildResumeSchema(text, meta);
-    const score = scoreResume(schema).totalScore;
+    try {
+      let schema = buildResumeSchema(text, meta);
+      
+      // LLM enhancement if confidence is low
+      const avgConfidence =
+        schema.skills.length + schema.projects.length + schema.experience.length === 0
+          ? 0
+          : (
+              [schema.skills, schema.projects, schema.experience]
+                .flatMap((arr) => arr.map((item) => item.confidence))
+                .reduce((a, b) => a + b, 0) /
+              Math.max(1, schema.skills.length + schema.projects.length + schema.experience.length)
+            );
 
-    const saved = await prisma.resume.create({
-      data: {
-        id: schema.meta.resumeId,
-        studentId: schema.meta.studentId ?? null,
-        batch: schema.meta.batch ?? null,
-        department: schema.meta.department ?? null,
-        schema: schema as unknown as Prisma.InputJsonValue,
-        score,
-      },
-    });
+      console.log(`[RESUME_PARSE] Confidence: ${avgConfidence.toFixed(2)}, skills=${schema.skills.length}, projects=${schema.projects.length}, experience=${schema.experience.length}`);
 
-    await enqueueResumeEmbeddingJob(saved.id);
+      if (avgConfidence < 0.6) {
+        console.log(`[RESUME_PARSE] Low confidence (${avgConfidence.toFixed(2)} < 0.6), calling LLM enhancement`);
+        const enhanced = await enhanceSchemaWithLLM(schema, text);
+        if (enhanced) {
+          console.log(`[RESUME_PARSE] LLM enhancement succeeded, updating schema`);
+          schema = enhanced;
+        } else {
+          console.log(`[RESUME_PARSE] LLM enhancement returned null`);
+        }
+      } else {
+        console.log(`[RESUME_PARSE] Confidence sufficient (${avgConfidence.toFixed(2)} >= 0.6), skipping LLM`);
+      }
 
-    res.json(saved);
+      const score = scoreResume(schema).totalScore;
+
+      const saved = await prisma.resume.create({
+        data: {
+          id: schema.meta.resumeId,
+          studentId: schema.meta.studentId ?? null,
+          batch: schema.meta.batch ?? null,
+          department: schema.meta.department ?? null,
+          schema: schema as unknown as Prisma.InputJsonValue,
+          score,
+        },
+      });
+
+      await enqueueResumeEmbeddingJob(saved.id);
+
+      res.json(saved);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "failed to parse resume";
+      res.status(500).json({ error: message });
+    }
   });
 
 
@@ -70,28 +103,60 @@ export function registerResumeRoutes(app: Router): void {
       return res.status(400).json({ error: message });
     }
 
-    const schema = buildResumeSchema(extractedText, meta);
-    const score = scoreResume(schema).totalScore;
+    try {
+      let schema = buildResumeSchema(extractedText, meta);
 
-    const saved = await prisma.resume.create({
-      data: {
-        id: schema.meta.resumeId,
-        studentId: schema.meta.studentId ?? null,
-        batch: schema.meta.batch ?? null,
-        department: schema.meta.department ?? null,
-        schema: schema as unknown as Prisma.InputJsonValue,
-        score,
-      },
-    });
+      // Try LLM enhancement if confidence is low
+      const avgConfidence =
+        schema.skills.length + schema.projects.length + schema.experience.length === 0
+          ? 0
+          : (
+              [schema.skills, schema.projects, schema.experience]
+                .flatMap((arr) => arr.map((item) => item.confidence))
+                .reduce((a, b) => a + b, 0) /
+              Math.max(1, schema.skills.length + schema.projects.length + schema.experience.length)
+            );
 
-    await enqueueResumeEmbeddingJob(saved.id);
+      console.log(`[RESUME_UPLOAD] File: ${file.originalname}, confidence: ${avgConfidence.toFixed(2)}, skills=${schema.skills.length}, projects=${schema.projects.length}, experience=${schema.experience.length}`);
 
-    res.json({
-      ...saved,
-      extraction: {
-        format,
-        textLength: extractedText.length,
-      },
-    });
+      if (avgConfidence < 0.6) {
+        console.log(`[RESUME_UPLOAD] Low confidence (${avgConfidence.toFixed(2)} < 0.6), calling LLM enhancement`);
+        const enhanced = await enhanceSchemaWithLLM(schema, extractedText);
+        if (enhanced) {
+          console.log(`[RESUME_UPLOAD] LLM enhancement succeeded, updating schema`);
+          schema = enhanced;
+        } else {
+          console.log(`[RESUME_UPLOAD] LLM enhancement returned null`);
+        }
+      } else {
+        console.log(`[RESUME_UPLOAD] Confidence sufficient (${avgConfidence.toFixed(2)} >= 0.6), skipping LLM`);
+      }
+
+      const score = scoreResume(schema).totalScore;
+
+      const saved = await prisma.resume.create({
+        data: {
+          id: schema.meta.resumeId,
+          studentId: schema.meta.studentId ?? null,
+          batch: schema.meta.batch ?? null,
+          department: schema.meta.department ?? null,
+          schema: schema as unknown as Prisma.InputJsonValue,
+          score,
+        },
+      });
+
+      await enqueueResumeEmbeddingJob(saved.id);
+
+      res.json({
+        ...saved,
+        extraction: {
+          format,
+          textLength: extractedText.length,
+        },
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "failed to parse resume";
+      res.status(500).json({ error: message });
+    }
   });
 }

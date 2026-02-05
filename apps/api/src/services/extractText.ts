@@ -42,9 +42,9 @@ export async function extractTextFromUpload(file: UploadedFileLike): Promise<Ext
 
   let text = "";
   if (format === "pdf") {
-    const mod = await import("pdf-parse");
-    const pdfParse: any = (mod as any).default ?? mod;
-    const result = await pdfParse(file.buffer);
+    const { extractText } = await import("unpdf");
+    const uint8Array = new Uint8Array(file.buffer);
+    const result = await extractText(uint8Array);
     text = String(result?.text ?? "");
   } else if (format === "docx") {
     const mammoth = await import("mammoth");

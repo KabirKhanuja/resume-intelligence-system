@@ -6,11 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { UploadCloud } from "lucide-react"
 import { ScanningResume } from "@/components/scanning-resume"
+import { uploadFile } from "@/lib/api"
 
 export default function UploadPage() {
     const router = useRouter()
     const [isUploading, setIsUploading] = useState(false)
     const [file, setFile] = useState<File | null>(null)
+    const [resumeId, setResumeId] = useState<string | null>(null)
+    const [scanDone, setScanDone] = useState(false)
+    const [error, setError] = useState<string | null>(null)
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -20,21 +24,44 @@ export default function UploadPage() {
 
     const handleUpload = () => {
         if (!file) return
+        setError(null)
+        setResumeId(null)
+        setScanDone(false)
         setIsUploading(true)
+
+        void (async () => {
+            try {
+                const form = new FormData()
+                form.append("file", file)
+
+                const saved = await uploadFile<{ id: string }>("/api/v1/resume/upload", form)
+                setResumeId(saved.id)
+
+                if (scanDone) {
+                    router.push(`/student/results?resumeId=${encodeURIComponent(saved.id)}`)
+                }
+            } catch (e) {
+                const message = e instanceof Error ? e.message : "Upload failed"
+                setError(message)
+                setIsUploading(false)
+            }
+        })()
     }
 
     const handleScanComplete = () => {
-        // Navigate to results after scan animation
-        // Small delay to let the "complete" state register visually
-        setTimeout(() => {
-            router.push("/student/results")
-        }, 800)
+        setScanDone(true)
+        if (resumeId) {
+            router.push(`/student/results?resumeId=${encodeURIComponent(resumeId)}`)
+        }
     }
 
     if (isUploading) {
         return (
             <div className="flex min-h-[60vh] flex-col items-center justify-center animate-in fade-in duration-700">
                 <ScanningResume onComplete={handleScanComplete} />
+                {error && (
+                    <p className="mt-6 text-sm text-red-600">{error}</p>
+                )}
             </div>
         )
     }
@@ -70,7 +97,7 @@ export default function UploadPage() {
 
                     {file && (
                         <div className="flex items-center gap-2 text-sm text-foreground bg-secondary px-3 py-1 rounded-full mt-4">
-                            <span className="truncate max-w-[200px] font-medium">{file.name}</span>
+                            <span className="truncate max-w-50 font-medium">{file.name}</span>
                         </div>
                     )}
                 </CardContent>
@@ -85,6 +112,9 @@ export default function UploadPage() {
                 >
                     Begin Analysis
                 </Button>
+                {error && (
+                    <p className="mt-3 text-sm text-red-600">{error}</p>
+                )}
             </div>
         </div>
     )
