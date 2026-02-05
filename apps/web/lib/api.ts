@@ -10,6 +10,14 @@ export class ApiError extends Error {
   }
 }
 
+const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "1";
+
+function debugLog(message: string, extra?: unknown) {
+  if (!DEBUG) return;
+  // eslint-disable-next-line no-console
+  console.log(message, extra ?? "");
+}
+
 async function parseJsonSafely(res: Response): Promise<unknown> {
   const text = await res.text();
   if (!text.trim()) return null;
@@ -21,6 +29,8 @@ async function parseJsonSafely(res: Response): Promise<unknown> {
 }
 
 export async function postJson<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
+  const startedAt = performance.now();
+  debugLog(`[WEB->API] POST ${path} (json)`);
   const res = await fetch(path, {
     method: "POST",
     headers: {
@@ -32,6 +42,7 @@ export async function postJson<T>(path: string, body: unknown, init?: RequestIni
   });
 
   const parsed = await parseJsonSafely(res);
+  debugLog(`[WEB->API] POST ${path} -> ${res.status} (${Math.round(performance.now() - startedAt)}ms)`);
   if (!res.ok) {
     const message =
       typeof parsed === "object" && parsed && "error" in parsed && typeof (parsed as any).error === "string"
@@ -44,6 +55,8 @@ export async function postJson<T>(path: string, body: unknown, init?: RequestIni
 }
 
 export async function uploadFile<T>(path: string, formData: FormData, init?: RequestInit): Promise<T> {
+  const startedAt = performance.now();
+  debugLog(`[WEB->API] POST ${path} (multipart)`);
   const res = await fetch(path, {
     method: "POST",
     body: formData,
@@ -51,6 +64,7 @@ export async function uploadFile<T>(path: string, formData: FormData, init?: Req
   });
 
   const parsed = await parseJsonSafely(res);
+  debugLog(`[WEB->API] POST ${path} -> ${res.status} (${Math.round(performance.now() - startedAt)}ms)`);
   if (!res.ok) {
     const message =
       typeof parsed === "object" && parsed && "error" in parsed && typeof (parsed as any).error === "string"

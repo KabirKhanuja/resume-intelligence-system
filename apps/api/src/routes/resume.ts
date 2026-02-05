@@ -36,8 +36,12 @@ export function registerResumeRoutes(app: Router): void {
 
       console.log(`[RESUME_PARSE] Confidence: ${avgConfidence.toFixed(2)}, skills=${schema.skills.length}, projects=${schema.projects.length}, experience=${schema.experience.length}`);
 
-      if (avgConfidence < 0.6) {
-        console.log(`[RESUME_PARSE] Low confidence (${avgConfidence.toFixed(2)} < 0.6), calling LLM enhancement`);
+      // if any major section is missing (projects especially), trigger LLM regardless of average confidence
+      const isMissingProjects = schema.projects.length === 0;
+      const shouldEnhance = (avgConfidence < 0.7) || isMissingProjects;
+
+      if (shouldEnhance) {
+        console.log(`[RESUME_PARSE] Low confidence or missing sections, calling LLM (projects=${schema.projects.length}, confidence=${avgConfidence.toFixed(2)})`);
         const enhanced = await enhanceSchemaWithLLM(schema, text);
         if (enhanced) {
           console.log(`[RESUME_PARSE] LLM enhancement succeeded, updating schema`);
@@ -45,8 +49,6 @@ export function registerResumeRoutes(app: Router): void {
         } else {
           console.log(`[RESUME_PARSE] LLM enhancement returned null`);
         }
-      } else {
-        console.log(`[RESUME_PARSE] Confidence sufficient (${avgConfidence.toFixed(2)} >= 0.6), skipping LLM`);
       }
 
       const score = scoreResume(schema).totalScore;
@@ -67,6 +69,7 @@ export function registerResumeRoutes(app: Router): void {
       res.json(saved);
     } catch (e) {
       const message = e instanceof Error ? e.message : "failed to parse resume";
+      console.error("[RESUME_PARSE] Error:", e);
       res.status(500).json({ error: message });
     }
   });
@@ -119,8 +122,12 @@ export function registerResumeRoutes(app: Router): void {
 
       console.log(`[RESUME_UPLOAD] File: ${file.originalname}, confidence: ${avgConfidence.toFixed(2)}, skills=${schema.skills.length}, projects=${schema.projects.length}, experience=${schema.experience.length}`);
 
-      if (avgConfidence < 0.6) {
-        console.log(`[RESUME_UPLOAD] Low confidence (${avgConfidence.toFixed(2)} < 0.6), calling LLM enhancement`);
+      // If any major section is missing (projects especially), trigger LLM regardless of average confidence
+      const isMissingProjects = schema.projects.length === 0;
+      const shouldEnhance = (avgConfidence < 0.7) || isMissingProjects;
+
+      if (shouldEnhance) {
+        console.log(`[RESUME_UPLOAD] Low confidence or missing sections, calling LLM (projects=${schema.projects.length}, confidence=${avgConfidence.toFixed(2)})`);
         const enhanced = await enhanceSchemaWithLLM(schema, extractedText);
         if (enhanced) {
           console.log(`[RESUME_UPLOAD] LLM enhancement succeeded, updating schema`);
@@ -128,8 +135,6 @@ export function registerResumeRoutes(app: Router): void {
         } else {
           console.log(`[RESUME_UPLOAD] LLM enhancement returned null`);
         }
-      } else {
-        console.log(`[RESUME_UPLOAD] Confidence sufficient (${avgConfidence.toFixed(2)} >= 0.6), skipping LLM`);
       }
 
       const score = scoreResume(schema).totalScore;
@@ -156,6 +161,7 @@ export function registerResumeRoutes(app: Router): void {
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : "failed to parse resume";
+      console.error("[RESUME_UPLOAD] Error:", e);
       res.status(500).json({ error: message });
     }
   });

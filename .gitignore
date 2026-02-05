@@ -55,6 +55,7 @@ venv/
 #for testing 
 scripts/seed-resumes.ts
 packages/resume-embeddings/src/testEmbed.ts
+scripts/testResume.pdf
 
 # Misc
 .DS_Store

@@ -1,5 +1,44 @@
 import type { Project, Experience, Skill, ResumeSchema } from "resume-core";
 
+function normalizeGeminiModelName(model: string): string {
+  return model.replace(/^models\//, "").trim();
+}
+
+async function pickGeminiGenerateContentModel(geminiBase: string, apiKey: string, preferred: string): Promise<string> {
+  const preferredNorm = normalizeGeminiModelName(preferred);
+  const listUrl = `${geminiBase}/models?key=${apiKey}`;
+
+  const resp = await fetch(listUrl, { method: "GET" });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`ListModels failed (${resp.status}): ${text.substring(0, 200)}`);
+  }
+
+  const data = (await resp.json()) as any;
+  const models = Array.isArray(data?.models) ? data.models : [];
+
+  const supportsGenerateContent = (m: any) =>
+    Array.isArray(m?.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent");
+
+  const candidates = models.filter(supportsGenerateContent);
+  if (!candidates.length) {
+    throw new Error("No Gemini models support generateContent");
+  }
+
+  const byName = (m: any) => normalizeGeminiModelName(String(m?.name ?? ""));
+
+  const exact = candidates.find((m: any) => byName(m) === preferredNorm);
+  if (exact) return byName(exact);
+
+  const contains = candidates.find((m: any) => byName(m).includes(preferredNorm));
+  if (contains) return byName(contains);
+
+  const flash = candidates.find((m: any) => byName(m).includes("flash"));
+  if (flash) return byName(flash);
+
+  return byName(candidates[0]);
+}
+
 async function extractWithLLM(
   resumeText: string,
   section: "projects" | "experience" | "skills",
@@ -44,16 +83,20 @@ async function extractWithLLM(
 
   try {
 
-    const isGemini = baseUrl.includes("generativelanguage.googleapis.com");
-    console.log(`[LLM] Using ${isGemini ? "Gemini" : "OpenAI"} API`);
+    const isGeminiHost = baseUrl.includes("generativelanguage.googleapis.com");
+    const isOpenAICompat = baseUrl.includes("/openai");
+    const isGeminiNative = isGeminiHost && !isOpenAICompat;
+    console.log(`[LLM] Using ${isGeminiNative ? "Gemini(native)" : "OpenAI-compatible"} API`);
 
     let url: string;
     let requestBody: string;
     let headers: Record<string, string>;
 
-    if (isGemini) {
-
-      url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
+    if (isGeminiNative) {
+      const base = baseUrl.replace(/\/+$/, "");
+      const geminiBase = base.includes("/v1beta") ? base : `${base}/v1beta`;
+      const modelName = normalizeGeminiModelName(model);
+      url = `${geminiBase}/models/${modelName}:generateContent?key=${apiKey}`;
       requestBody = JSON.stringify({
         contents: [
           {
@@ -72,38 +115,86 @@ async function extractWithLLM(
         "Content-Type": "application/json",
       };
     } else {
-
-      url = new URL("/v1/chat/completions", baseUrl).toString();
+      const openaiPath = isGeminiHost ? "/chat/completions" : "/v1/chat/completions";
+      url = new URL(openaiPath, baseUrl).toString();
       requestBody = JSON.stringify(body);
       headers = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+        ...(isGeminiHost ? { "x-goog-api-key": apiKey } : {}),
       };
     }
 
     console.log(`[LLM] Fetching: ${url.split("?")[0]}`);
-    const resp = await fetch(url, {
-      method: "POST",
-      headers,
-      body: requestBody,
-    });
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+    
+    let resp: Response;
+    try {
+      resp = await fetch(url, {
+        method: "POST",
+        headers,
+        body: requestBody,
+        signal: controller.signal,
+      });
 
-    console.log(`[LLM] Response status: ${resp.status}`);
-    if (!resp.ok) {
-      const errorText = await resp.text();
-      console.log(`[LLM] Error response: ${errorText.substring(0, 300)}`);
+      clearTimeout(timeoutId);
+      console.log(`[LLM] Response status: ${resp.status}`);
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        console.log(`[LLM] Error response: ${errorText.substring(0, 300)}`);
+
+        if (
+          resp.status === 404 &&
+          isGeminiNative &&
+          baseUrl.includes("generativelanguage.googleapis.com")
+        ) {
+          try {
+            const base = baseUrl.replace(/\/+$/, "");
+            const geminiBase = base.includes("/v1beta") ? base : `${base}/v1beta`;
+            const picked = await pickGeminiGenerateContentModel(geminiBase, apiKey, model);
+            console.log(`[LLM] Retrying with model: ${picked}`);
+            const retryUrl = `${geminiBase}/models/${picked}:generateContent?key=${apiKey}`;
+            resp = await fetch(retryUrl, {
+              method: "POST",
+              headers,
+              body: requestBody,
+              signal: controller.signal,
+            });
+            console.log(`[LLM] Retry status: ${resp.status}`);
+            if (!resp.ok) {
+              const retryError = await resp.text();
+              console.log(`[LLM] Retry error: ${retryError.substring(0, 300)}`);
+              return null;
+            }
+          } catch (retryErr) {
+            console.log(
+              `[LLM] Model auto-pick failed: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+            );
+            return null;
+          }
+        } else {
+          return null;
+        }
+      }
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError instanceof Error && fetchError.name === "AbortError") {
+        console.log(`[LLM] Request timeout (8s)`);
+      } else {
+        console.log(`[LLM] Fetch error: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+      }
       return null;
     }
 
     const data = (await resp.json()) as any;
     let text: string | undefined;
 
-    if (isGemini) {
-      // Extract from Gemini response
+    if (isGeminiNative) {
       text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       console.log(`[LLM] Gemini extracted text length: ${String(text).length}`);
     } else {
-      // Extract from OpenAI response
       text = data?.choices?.[0]?.message?.content;
       console.log(`[LLM] OpenAI extracted text length: ${String(text).length}`);
     }
@@ -181,7 +272,6 @@ export async function enhanceSchemaWithLLM(
 
     console.log(`[LLM] LLM results: projects=${projects?.length ?? "null"}, experience=${experience?.length ?? "null"}, skills=${skills?.length ?? "null"}`);
 
-    // Only update if we got results
     if (projects || experience || skills) {
       console.log(`[LLM] Returning enhanced schema`);
       return {
