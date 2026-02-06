@@ -28,27 +28,25 @@ async function parseJsonSafely(res: Response): Promise<unknown> {
   }
 }
 
-export async function postJson<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
-  const startedAt = performance.now();
-  debugLog(`[WEB->API] POST ${path} (json)`);
-  const res = await fetch(path, {
+export async function postJson<T>(url: string, body: unknown): Promise<T> {
+  if (DEBUG) console.log("[api] POST", url, body);
+
+  const resp = await fetch(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    ...init,
   });
 
-  const parsed = await parseJsonSafely(res);
-  debugLog(`[WEB->API] POST ${path} -> ${res.status} (${Math.round(performance.now() - startedAt)}ms)`);
-  if (!res.ok) {
+  const parsed = await parseJsonSafely(resp);
+  const debugText = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+  if (DEBUG) console.log("[api] RESP", url, resp.status, debugText.slice(0, 500));
+
+  if (!resp.ok) {
     const message =
       typeof parsed === "object" && parsed && "error" in parsed && typeof (parsed as any).error === "string"
         ? (parsed as any).error
-        : `Request failed (${res.status})`;
-    throw new ApiError(message, res.status, parsed);
+        : `Request failed: ${resp.status}`;
+    throw new ApiError(message, resp.status, parsed);
   }
 
   return parsed as T;

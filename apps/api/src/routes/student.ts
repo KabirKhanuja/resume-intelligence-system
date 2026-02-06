@@ -13,7 +13,7 @@ import { cosineSimilarity, embedText } from "resume-embeddings";
 
 import { toResumeSchema, toEmbedding } from "../services/guards.js";
 import { computeGapSummary, type GapSummary, type GapEvidence } from "../services/gaps.js";
-import { fallbackAdvice, summarizeGapsWithLLM } from "../services/llm.js";
+import { fallbackAdvice, summarizeGapsWithLLM, type LlmProviderConfig } from "../services/llm.js";
 import { consumeDailyLlmQuota } from "../services/llmRateLimit.js";
 
 export function registerStudentRoutes(app: Router): void {
@@ -195,21 +195,18 @@ export function registerStudentRoutes(app: Router): void {
     const studentSchema = toResumeSchema(studentRow.schema);
     if (!studentSchema) return res.status(500).json({ error: "invalid schema in db" });
 
-    const studentId = studentRow.studentId ?? studentSchema.meta.studentId;
-    if (!studentId) {
-      return res.status(400).json({
-        error: "studentId missing (store it in resume.meta.studentId or Resume.studentId)",
-      });
-    }
+    // For rate limiting we prefer a real studentId, but the system should still work
+    // even if the resume doesn't contain one (common in early demos).
+    // Use a stable anonymous key so quota still applies per-resume/day.
+    const studentId = studentRow.studentId ?? studentSchema.meta.studentId ?? `resume:${resumeId}`;
 
     const llmBaseUrl = process.env.LLM_BASE_URL;
     const llmApiKey = process.env.LLM_API_KEY;
     const llmModel = process.env.LLM_MODEL ?? "gpt-4o-mini";
-    if (!llmBaseUrl || !llmApiKey) {
-      return res.status(503).json({
-        error: "LLM is not configured (set LLM_BASE_URL and LLM_API_KEY)",
-      });
-    }
+
+    const ollamaBaseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+    const ollamaModel = process.env.OLLAMA_MODEL ?? "llama3.2:latest";
+    const ollamaApiKey = process.env.OLLAMA_API_KEY;
 
     const dailyLimitRaw = process.env.LLM_DAILY_LIMIT || "2";
     const dailyLimit = dailyLimitRaw && Number.isFinite(Number(dailyLimitRaw)) ? Number(dailyLimitRaw) : 2;
@@ -296,30 +293,52 @@ export function registerStudentRoutes(app: Router): void {
       });
     }
 
-    const quota = await consumeDailyLlmQuota({
-      studentId,
-      resumeId,
-      endpoint: "/student/feedback",
-      limit: dailyLimit,
-      model: llmModel,
-    });
+    const primaryConfigured = Boolean(llmBaseUrl && llmApiKey);
+    const primaryIsGemini = Boolean(llmBaseUrl && llmBaseUrl.includes("generativelanguage.googleapis.com"));
 
-    if (!quota.allowed) {
-      return res.status(429).json({
-        error: "LLM daily limit exceeded",
-        limit: quota.limit,
-        used: quota.used,
-        remaining: quota.remaining,
-        resetAt: quota.resetAt,
-      });
-    }
+    // Quota applies only to the primary (remote) provider.
+    const quota = primaryConfigured
+      ? await consumeDailyLlmQuota({
+          studentId,
+          resumeId,
+          endpoint: "/student/feedback",
+          limit: dailyLimit,
+          model: llmModel,
+        })
+      : {
+          allowed: false,
+          limit: dailyLimit,
+          used: 0,
+          remaining: dailyLimit,
+          resetAt: null,
+        };
+
+    const quotaResetAt = "resetAt" in quota ? quota.resetAt : null;
 
     const { gaps, evidence } = computeGapSummary(studentSchema, groupSchemas);
     const context = `Give resume feedback for studentId=${studentId}. Compared to top ${evidence.groupSize} peers in batch=${studentRow.batch ?? "?"}, department=${studentRow.department ?? "?"} (mode=${groupMode}).`;
 
-    const adviceBullets =
-      (await summarizeGapsWithLLM(gaps, context)) ??
-      fallbackAdvice(gaps);
+    const providers: LlmProviderConfig[] = [];
+    if (primaryConfigured && quota.allowed) {
+      providers.push(
+        primaryIsGemini
+          ? { kind: "gemini", label: "gemini", baseUrl: llmBaseUrl!, apiKey: llmApiKey!, model: llmModel }
+          : { kind: "openai-compatible", label: "primary", baseUrl: llmBaseUrl!, apiKey: llmApiKey!, model: llmModel },
+      );
+    }
+    // Always allow local Ollama as fallback if present.
+    if (ollamaBaseUrl) {
+      providers.push({
+        kind: "openai-compatible",
+        label: "ollama",
+        baseUrl: ollamaBaseUrl,
+        model: ollamaModel,
+        ...(ollamaApiKey ? { apiKey: ollamaApiKey } : {}),
+      });
+    }
+
+    const llmSummary = providers.length ? await summarizeGapsWithLLM(gaps, context, providers) : null;
+    const adviceBullets = llmSummary?.bullets ?? fallbackAdvice(gaps);
 
     res.json({
       group: {
@@ -335,7 +354,10 @@ export function registerStudentRoutes(app: Router): void {
         limit: quota.limit,
         used: quota.used,
         remaining: quota.remaining,
-        model: llmModel,
+        model: llmSummary?.model ?? llmModel,
+        provider: llmSummary?.provider ?? (quota.allowed ? "primary" : "fallback"),
+        quotaBlocked: primaryConfigured && !quota.allowed,
+        resetAt: quotaResetAt,
       },
     });
   });

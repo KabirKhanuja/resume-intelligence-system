@@ -44,10 +44,46 @@ type MissingResponse = {
   adviceBullets: string[]
 }
 
+type LlmFeedbackResponse = {
+  adviceBullets: string[]
+  llm?: {
+    limit: number
+    used: number
+    remaining: number
+    model: string
+  }
+}
+
+function clampPct(n: number) {
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.min(100, Math.round(n)))
+}
+
+function pickInsightBullet(
+  bullets: string[],
+  focus: "skills" | "projects" | "experience" | "structure" | null,
+): string | null {
+  if (!bullets.length) return null
+  if (!focus) return bullets[0] ?? null
+
+  const patterns: Record<Exclude<typeof focus, null>, RegExp> = {
+    skills: /\bskills?\b/i,
+    projects: /\bprojects?\b|\bdomain\b/i,
+    experience: /\bexperience\b|\bintern\b|\bwork\b/i,
+    structure: /\bsection\b|\bformat\b|\blayout\b|\bstructure\b/i,
+  }
+
+  const p = patterns[focus]
+  return bullets.find((b) => p.test(b)) ?? bullets[0] ?? null
+}
+
 export default function ResultsClient({ resumeId }: { resumeId: string | null }) {
   const [score, setScore] = useState<ResumeScore | null>(null)
   const [comparison, setComparison] = useState<CohortComparisonResult | null>(null)
   const [missing, setMissing] = useState<MissingResponse | null>(null)
+  const [llmFeedback, setLlmFeedback] = useState<LlmFeedbackResponse | null>(null)
+  const [llmLoading, setLlmLoading] = useState(false)
+  const [llmError, setLlmError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -70,6 +106,8 @@ export default function ResultsClient({ resumeId }: { resumeId: string | null })
         setScore(s)
         setComparison(c)
         setMissing(m)
+        setLlmFeedback(null)
+        setLlmError(null)
       } catch (e) {
         if (cancelled) return
         const message = e instanceof Error ? e.message : "Failed to load results"
@@ -85,28 +123,80 @@ export default function ResultsClient({ resumeId }: { resumeId: string | null })
   }, [resumeId])
 
   const sections = useMemo(() => {
-    if (!score) return [] as Array<{ name: string; score: number }>
+    if (!score) return [] as Array<{ name: string; score: number; max: number }>
     return [
-      { name: "Skills", score: score.breakdown.skills },
-      { name: "Projects", score: score.breakdown.projects },
-      { name: "Experience", score: score.breakdown.experience },
-      { name: "Structure", score: score.breakdown.structure },
+      { name: "Skills", score: score.breakdown.skills, max: 30 },
+      { name: "Projects", score: score.breakdown.projects, max: 35 },
+      { name: "Experience", score: score.breakdown.experience, max: 25 },
+      { name: "Structure", score: score.breakdown.structure, max: 10 },
     ]
   }, [score])
 
-  const topPercent =
-    typeof comparison?.percentile === "number"
-      ? Math.max(0, Math.min(100, 100 - comparison.percentile))
-      : null
+  const llmAdviceBullets = llmFeedback?.adviceBullets?.filter(Boolean) ?? []
 
   const insightText = useMemo(() => {
-    if (!comparison) return null
-    const missingCommon = comparison.comparisons.skills.missingCommon
-    if (missingCommon.length > 0) {
-      return `Adding a few common cohort skills could help. Top missing: ${missingCommon.slice(0, 5).join(", ")}.`
+    const focus = (() => {
+      if (!score) return null
+      const parts = [
+        { key: "skills" as const, ratio: score.breakdown.skills / 30 },
+        { key: "projects" as const, ratio: score.breakdown.projects / 35 },
+        { key: "experience" as const, ratio: score.breakdown.experience / 25 },
+        { key: "structure" as const, ratio: score.breakdown.structure / 10 },
+      ]
+      parts.sort((a, b) => a.ratio - b.ratio)
+      return parts[0]?.key ?? null
+    })()
+
+    if (llmAdviceBullets.length > 0) return pickInsightBullet(llmAdviceBullets, focus)
+
+    const deterministicBullets = missing?.adviceBullets?.filter(Boolean) ?? []
+    if (deterministicBullets.length > 0) {
+      return pickInsightBullet(deterministicBullets, focus)
     }
-    return "Your resume includes most common cohort skills. Next, focus on strengthening projects and quantified impact."
-  }, [comparison])
+
+    const missingCommon = comparison?.comparisons?.skills?.missingCommon ?? []
+    if (missingCommon.length > 0) {
+      return `Consider adding these cohort-common skills if you have them: ${missingCommon
+        .slice(0, 6)
+        .join(", ")}.`
+    }
+
+    return null
+  }, [comparison, llmAdviceBullets, missing, score])
+
+  const betterThanPct =
+    typeof comparison?.percentile === "number" ? clampPct(comparison.percentile) : null
+
+  const standingPct = betterThanPct === null ? null : clampPct(100 - betterThanPct)
+
+  // comparison.percentile is "better than X%" (higher is better).
+  // If you're better than >=50%, you're above median -> show Top (100 - betterThan)%.
+  // Otherwise show Bottom (100 - betterThan)%.
+  const standingLabel =
+    standingPct === null
+      ? null
+      : betterThanPct !== null && betterThanPct >= 50
+        ? `Top ${standingPct}%`
+        : `Bottom ${standingPct}%`
+
+  async function generateAiFeedback() {
+    if (!resumeId) return
+    setLlmLoading(true)
+    setLlmError(null)
+    try {
+      const resp = await postJson<LlmFeedbackResponse>("/api/v1/student/feedback", {
+        resumeId,
+        topN: 10,
+        mode: "score",
+      })
+      setLlmFeedback(resp)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to generate AI feedback"
+      setLlmError(message)
+    } finally {
+      setLlmLoading(false)
+    }
+  }
 
   if (!resumeId) {
     return (
@@ -155,17 +245,21 @@ export default function ResultsClient({ resumeId }: { resumeId: string | null })
               </span>
               <span className="text-sm text-muted-foreground">/ 100</span>
             </div>
+
             <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-              {topPercent !== null && (
+              {standingLabel && (
                 <Badge
                   variant="success"
                   className="bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 border-0"
                 >
-                  Top {topPercent}%
+                  {standingLabel}
                 </Badge>
               )}
-              <span>Better than {comparison?.percentile ?? (loading ? "…" : "—")}% of peers</span>
+              <span>
+                Better than {betterThanPct ?? (loading ? "…" : "—")}% of peers
+              </span>
             </div>
+
             <Progress value={score?.totalScore ?? 0} className="mt-4 h-2" />
           </CardContent>
         </Card>
@@ -197,9 +291,14 @@ export default function ResultsClient({ resumeId }: { resumeId: string | null })
               <div key={section.name} className="space-y-2">
                 <div className="flex justify-between text-sm font-medium">
                   <span>{section.name}</span>
-                  <span>{section.score}/100</span>
+                  <span>
+                    {section.score}/{section.max}
+                  </span>
                 </div>
-                <Progress value={section.score} className="h-2" />
+                <Progress
+                  value={section.max > 0 ? clampPct((section.score / section.max) * 100) : 0}
+                  className="h-2"
+                />
               </div>
             ))}
             {!loading && sections.length === 0 && (
@@ -213,7 +312,24 @@ export default function ResultsClient({ resumeId }: { resumeId: string | null })
             <CardTitle>Actionable Feedback</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {missing?.adviceBullets?.slice(0, 6).map((bullet, i) => (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant={llmFeedback ? "outline" : "default"}
+                className="w-full"
+                onClick={generateAiFeedback}
+                disabled={llmLoading || loading}
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                {llmLoading ? "Generating AI feedback…" : llmFeedback ? "Regenerate AI feedback" : "Generate AI feedback"}
+              </Button>
+            </div>
+
+            {llmError && <p className="text-xs text-red-600">{llmError}</p>}
+
+            {(llmAdviceBullets.length > 0 ? llmAdviceBullets : missing?.adviceBullets ?? [])
+              .slice(0, 6)
+              .map((bullet, i) => (
               <div key={i} className="flex gap-3 items-start p-3 rounded-lg hover:bg-muted/50 transition-colors">
                 <div className={cn("mt-0.5", "text-amber-500")}>
                   <TrendingUp className="h-5 w-5" />
@@ -239,7 +355,7 @@ export default function ResultsClient({ resumeId }: { resumeId: string | null })
               </div>
             ) : null}
 
-            {!loading && !missing?.adviceBullets?.length && (
+            {!loading && llmAdviceBullets.length === 0 && !missing?.adviceBullets?.length && (
               <p className="text-sm text-muted-foreground">No feedback available.</p>
             )}
 
