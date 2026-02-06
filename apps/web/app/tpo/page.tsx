@@ -4,13 +4,49 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Plus, Users, Briefcase, Search } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
-export default function TPODashboard() {
-    // Mock data for companies/drives
-    const activeDrives = [
-        { id: 1, company: "TechCorp Inc.", role: "SDE I", applicants: 145, shortlisted: 20, status: "Active", date: "2024-03-10" },
-        { id: 2, company: "FinServe Global", role: "Data Analyst", applicants: 89, shortlisted: 12, status: "Processing", date: "2024-03-12" },
-        { id: 3, company: "MediaFlow", role: "Product Designer", applicants: 56, shortlisted: 0, status: "Open", date: "2024-03-15" },
-    ]
+type DriveRow = {
+    id: string
+    company: string
+    role: string
+    topN: number
+    applicants: number
+    shortlisted: number
+    status: string
+    createdAt: string
+}
+
+type TpoStats = {
+    candidates: number
+    companies: number
+    drives: number
+}
+
+function getApiBase() {
+    return (process.env.API_BASE_URL ?? "http://localhost:4000").replace(/\/$/, "")
+}
+
+async function loadDrives(): Promise<DriveRow[]> {
+    try {
+        const res = await fetch(`${getApiBase()}/api/v1/tpo/drives?limit=10`, { cache: "no-store" })
+        if (!res.ok) return []
+        return (await res.json()) as DriveRow[]
+    } catch {
+        return []
+    }
+}
+
+async function loadStats(): Promise<TpoStats> {
+    try {
+        const res = await fetch(`${getApiBase()}/api/v1/tpo/stats`, { cache: "no-store" })
+        if (!res.ok) return { candidates: 0, companies: 0, drives: 0 }
+        return (await res.json()) as TpoStats
+    } catch {
+        return { candidates: 0, companies: 0, drives: 0 }
+    }
+}
+
+export default async function TPODashboard() {
+    const [drives, stats] = await Promise.all([loadDrives(), loadStats()])
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
@@ -33,8 +69,8 @@ export default function TPODashboard() {
                         <Users className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">1,204</div>
-                        <p className="text-xs text-muted-foreground mb-1">+12% from last month</p>
+                        <div className="text-2xl font-bold">{stats.candidates}</div>
+                        <p className="text-xs text-muted-foreground mb-1">Resumes in database</p>
                     </CardContent>
                 </Card>
                 <Card>
@@ -43,8 +79,8 @@ export default function TPODashboard() {
                         <Briefcase className="h-4 w-4 text-blue-600" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">18</div>
-                        <p className="text-xs text-muted-foreground mb-1">+2 new this week</p>
+                        <div className="text-2xl font-bold">{stats.companies}</div>
+                        <p className="text-xs text-muted-foreground mb-1">Companies shortlisted</p>
                     </CardContent>
                 </Card>
                 <Card>
@@ -53,8 +89,8 @@ export default function TPODashboard() {
                         <Search className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">92%</div>
-                        <p className="text-xs text-muted-foreground mb-1">Match relevance score</p>
+                        <div className="text-2xl font-bold">{stats.drives}</div>
+                        <p className="text-xs text-muted-foreground mb-1">Total drives created</p>
                     </CardContent>
                 </Card>
             </div>
@@ -62,7 +98,7 @@ export default function TPODashboard() {
             <div className="space-y-4">
                 <h2 className="text-xl font-semibold tracking-tight">Recent Drives</h2>
                 <div className="grid gap-4">
-                    {activeDrives.map((drive) => (
+                    {drives.map((drive) => (
                         <Card key={drive.id} className="flex flex-col md:flex-row items-center justify-between p-6 hover:bg-muted/30 transition-colors">
                             <div className="space-y-1 md:w-1/3">
                                 <h3 className="font-semibold text-lg">{drive.company}</h3>
@@ -84,13 +120,23 @@ export default function TPODashboard() {
                             </div>
 
                             <div className="flex items-center gap-4 md:w-1/3 justify-end">
-                                <Badge variant={drive.status === 'Active' ? 'success' : drive.status === 'Processing' ? 'warning' : 'outline'}>
+                                <Badge variant={drive.status === "done" ? "success" : "outline"}>
                                     {drive.status}
                                 </Badge>
-                                <Button variant="outline" size="sm">View Details</Button>
+                                <Link href={`/tpo/drives/${encodeURIComponent(drive.id)}`}>
+                                    <Button variant="outline" size="sm">View Details</Button>
+                                </Link>
+                                <Link href={`/tpo/drives/${encodeURIComponent(drive.id)}/edit`}>
+                                    <Button variant="ghost" size="sm">Edit</Button>
+                                </Link>
                             </div>
                         </Card>
                     ))}
+                    {drives.length === 0 && (
+                        <Card className="p-6">
+                            <div className="text-sm text-muted-foreground">No drives yet. Create one from “New Drive”.</div>
+                        </Card>
+                    )}
                 </div>
             </div>
         </div>

@@ -195,9 +195,6 @@ export function registerStudentRoutes(app: Router): void {
     const studentSchema = toResumeSchema(studentRow.schema);
     if (!studentSchema) return res.status(500).json({ error: "invalid schema in db" });
 
-    // For rate limiting we prefer a real studentId, but the system should still work
-    // even if the resume doesn't contain one (common in early demos).
-    // Use a stable anonymous key so quota still applies per-resume/day.
     const studentId = studentRow.studentId ?? studentSchema.meta.studentId ?? `resume:${resumeId}`;
 
     const llmBaseUrl = process.env.LLM_BASE_URL;
@@ -296,7 +293,6 @@ export function registerStudentRoutes(app: Router): void {
     const primaryConfigured = Boolean(llmBaseUrl && llmApiKey);
     const primaryIsGemini = Boolean(llmBaseUrl && llmBaseUrl.includes("generativelanguage.googleapis.com"));
 
-    // Quota applies only to the primary (remote) provider.
     const quota = primaryConfigured
       ? await consumeDailyLlmQuota({
           studentId,
@@ -326,7 +322,7 @@ export function registerStudentRoutes(app: Router): void {
           : { kind: "openai-compatible", label: "primary", baseUrl: llmBaseUrl!, apiKey: llmApiKey!, model: llmModel },
       );
     }
-    // Always allow local Ollama as fallback if present.
+    // allowing here local ollama as fallback if present
     if (ollamaBaseUrl) {
       providers.push({
         kind: "openai-compatible",

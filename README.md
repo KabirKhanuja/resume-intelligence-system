@@ -39,9 +39,20 @@ npm run dev
 ```
 > Runs on [http://localhost:8000](http://localhost:8000) (default)
 
-### 3. Run the Embedding Worker
+### Clearing the dev database (optional)
 
-The Python server handles vector embeddings for resumes and JDs.
+If you want to remove all resumes/drives/jobs/logs and start fresh:
+
+```bash
+cd apps/api
+npm run db:clear
+```
+
+If Prisma Studio was open while you reset/delete the DB file, restart Studio so it reconnects to the new database.
+
+### 3. Run the Embeddings Server (Python)
+
+The Python server generates embeddings when called.
 
 ```bash
 cd infra/embeddings
@@ -49,6 +60,21 @@ pip install -r requirements.txt
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 ```
 > Runs on [http://localhost:8001](http://localhost:8001)
+
+### 4. Run the Embedding Worker (Node)
+
+Resume uploads enqueue embedding jobs into the DB. This worker consumes those jobs and writes embeddings back to `Resume.embedding`.
+
+```bash
+cd ../..
+npm run embeddings:worker
+```
+
+To process the queue once and exit:
+
+```bash
+npm run embeddings:once
+```
 
 ## Architecture Overview
 

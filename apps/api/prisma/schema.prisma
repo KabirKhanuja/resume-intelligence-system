@@ -15,6 +15,11 @@ model Resume {
   schema             Json
   score              Int
 
+  filePath           String?
+  fileName           String?
+  fileMime           String?
+  fileSize           Int?
+
   embedding           Json?
   embeddingModel      String?
   embeddingStatus     String   @default("pending")
@@ -26,6 +31,25 @@ model Resume {
   @@index([embeddingStatus])
   @@index([batch, department])
   @@index([score])
+}
+
+model Drive {
+  id         String   @id @default(cuid())
+  company    String
+  role       String
+  jdText     String
+  topN       Int
+
+  applicants Int
+  shortlisted Int
+
+  results    Json
+
+  status     String   @default("done") 
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([company])
 }
 
 model Job {

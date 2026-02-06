@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -15,6 +16,11 @@ type ShortlistResult = {
     baseScore: number
 }
 
+type ShortlistResponse = {
+    driveId: string
+    results: ShortlistResult[]
+}
+
 export default function ShortlistPage() {
     const [step, setStep] = useState<"input" | "processing" | "results">("input")
 
@@ -24,18 +30,23 @@ export default function ShortlistPage() {
     const [jd, setJd] = useState("")
     const [topN, setTopN] = useState(10)
     const [results, setResults] = useState<ShortlistResult[]>([])
+    const [driveId, setDriveId] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
 
     const handleShortlist = async () => {
         if (!company || !role || !jd) return
         setError(null)
+        setDriveId(null)
         setStep("processing")
         try {
-            const res = await postJson<ShortlistResult[]>("/api/v1/tpo/shortlist", {
+            const res = await postJson<ShortlistResponse>("/api/v1/tpo/shortlist", {
+                company,
+                role,
                 jdText: jd,
                 topN,
             })
-            setResults(res)
+            setDriveId(res.driveId)
+            setResults(res.results)
             setStep("results")
         } catch (e) {
             const message = e instanceof Error ? e.message : "Shortlisting failed"
@@ -73,7 +84,13 @@ export default function ShortlistPage() {
                     </div>
                     <div className="ml-auto flex items-center gap-2">
                         <Badge variant="outline" className="h-8 px-3">Top {results.length} Matches</Badge>
-                        <Button disabled>Save Shortlist</Button>
+                        {driveId ? (
+                            <Link href={`/tpo/drives/${encodeURIComponent(driveId)}`}>
+                                <Button variant="secondary" size="sm">View Drive</Button>
+                            </Link>
+                        ) : (
+                            <Button disabled>Saving…</Button>
+                        )}
                     </div>
                 </div>
 
@@ -107,9 +124,11 @@ export default function ShortlistPage() {
                             </div>
 
                             <div className="ml-auto">
-                                <Button variant="ghost" size="sm">
-                                    View Profile <ChevronRight className="ml-1 h-4 w-4" />
-                                </Button>
+                                <Link href={`/tpo/shortlist/${encodeURIComponent(candidate.resumeId)}`}>
+                                    <Button variant="ghost" size="sm">
+                                        View Profile <ChevronRight className="ml-1 h-4 w-4" />
+                                    </Button>
+                                </Link>
                             </div>
                         </Card>
                     ))}

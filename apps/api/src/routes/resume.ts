@@ -1,6 +1,8 @@
 import type { Router } from "express";
 import type { Prisma } from "@prisma/client";
 import multer from "multer";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "../db.js";
 
 import { buildResumeSchema, scoreResume } from "resume-core";
@@ -15,6 +17,12 @@ export function registerResumeRoutes(app: Router): void {
     },
   });
 
+  const uploadsDir = path.resolve(process.cwd(), "uploads");
+
+  async function ensureUploadsDir() {
+    await fs.mkdir(uploadsDir, { recursive: true });
+  }
+
   // resume parsing api
   app.post("/resume/parse", upload.none(), async (req, res) => {
     const { text, meta } = req.body as { text?: string; meta?: any };
@@ -23,7 +31,7 @@ export function registerResumeRoutes(app: Router): void {
     try {
       let schema = buildResumeSchema(text, meta);
       
-      // LLM enhancement if confidence is low
+      // llm enhancement if confidence is low
       const avgConfidence =
         schema.skills.length + schema.projects.length + schema.experience.length === 0
           ? 0
@@ -139,6 +147,27 @@ export function registerResumeRoutes(app: Router): void {
 
       const score = scoreResume(schema).totalScore;
 
+      await ensureUploadsDir();
+      const safeExt = (() => {
+        const ext = path.extname(file.originalname || "").toLowerCase();
+        if (ext === ".pdf" || ext === ".docx" || ext === ".txt") return ext;
+        if (file.mimetype === "application/pdf") return ".pdf";
+        if (file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return ".docx";
+        if (file.mimetype.startsWith("text/")) return ".txt";
+        return ".bin";
+      })();
+
+      const storedFileName = `${schema.meta.resumeId}${safeExt}`;
+      const relativeFilePath = path.join("uploads", storedFileName);
+      const absoluteFilePath = path.join(uploadsDir, storedFileName);
+
+      try {
+        await fs.writeFile(absoluteFilePath, file.buffer);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "failed to save uploaded file";
+        return res.status(500).json({ error: message });
+      }
+
       const saved = await prisma.resume.create({
         data: {
           id: schema.meta.resumeId,
@@ -147,6 +176,10 @@ export function registerResumeRoutes(app: Router): void {
           department: schema.meta.department ?? null,
           schema: schema as unknown as Prisma.InputJsonValue,
           score,
+          filePath: relativeFilePath,
+          fileName: file.originalname ?? storedFileName,
+          fileMime: file.mimetype ?? null,
+          fileSize: typeof file.size === "number" ? file.size : null,
         },
       });
 
