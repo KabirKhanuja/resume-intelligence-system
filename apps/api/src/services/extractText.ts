@@ -38,13 +38,31 @@ export async function extractTextFromUpload(file: UploadedFileLike): Promise<Ext
     throw new Error("Invalid upload: missing file buffer");
   }
 
+  const withTimeout = async <T>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(message)), ms);
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  };
+
   const format = detectFormat(file);
 
   let text = "";
   if (format === "pdf") {
-    const mod = await import("pdf-parse");
-    const pdfParse: any = (mod as any).default ?? mod;
-    const result = await pdfParse(file.buffer);
+    const { extractText } = await import("unpdf");
+    const uint8Array = new Uint8Array(file.buffer);
+    const result = await withTimeout(
+      extractText(uint8Array),
+      8000,
+      "PDF text extraction timed out (8s). Please try a different PDF or paste the text.",
+    );
     text = String(result?.text ?? "");
   } else if (format === "docx") {
     const mammoth = await import("mammoth");

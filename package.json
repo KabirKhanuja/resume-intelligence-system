@@ -11,6 +11,8 @@
   ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "embeddings:worker": "npx tsx scripts/embedding-worker.ts --watch --backfill",
+    "embeddings:once": "npx tsx scripts/embedding-worker.ts",
     "build": "turbo run build"
   },
   "repository": {

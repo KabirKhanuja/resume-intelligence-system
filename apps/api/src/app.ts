@@ -6,6 +6,16 @@ import { registerTpoRoutes } from "./routes/tpo.js";
 
 export function createApp(): express.Express {
   const app = express();
+
+  app.use((req, res, next) => {
+    const startedAt = Date.now();
+    res.on("finish", () => {
+      const ms = Date.now() - startedAt;
+      console.log(`[HTTP] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms}ms)`);
+    });
+    next();
+  });
+
   app.use(express.json());
 
   const rootRouter = express.Router();

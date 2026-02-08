@@ -14,7 +14,12 @@ export function normalizeHeading(rawHeading: string): string {
 
     // to remove leading numbering 
     heading = heading.replace(/^[\d]+\s*[.)-]?\s*/, "");
-    heading = heading.replace(/^[ivxlcdm]+\s*[.)-]?\s*/i, "");
+
+    // Remove leading roman numerals only when they look like a standalone prefix
+    // (e.g. "IV. Education", "I) Skills", "II - Projects").
+    // Do NOT strip when the text is a normal word starting with "i" (e.g. "Internships").
+    heading = heading.replace(/^[ivxlcdm]+\s*[.)-]\s*/i, "");
+    heading = heading.replace(/^[ivxlcdm]+\s+(?=\w)/i, "");
 
     // to replace punctuation and separators with spaces
     heading = heading.replace(/[^\w\s]/g, " ");

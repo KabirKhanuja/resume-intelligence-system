@@ -1,11 +1,14 @@
 import type { Router } from "express";
 import type { Prisma } from "@prisma/client";
 import multer from "multer";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "../db.js";
 
 import { buildResumeSchema, scoreResume } from "resume-core";
 import { extractTextFromUpload } from "../services/extractText.js";
 import { enqueueResumeEmbeddingJob } from "../services/jobQueue.js";
+import { enhanceSchemaWithLLM } from "../services/resumeExtractor.js";
 
 export function registerResumeRoutes(app: Router): void {
   const upload = multer({
@@ -14,28 +17,69 @@ export function registerResumeRoutes(app: Router): void {
     },
   });
 
+  const uploadsDir = path.resolve(process.cwd(), "uploads");
+
+  async function ensureUploadsDir() {
+    await fs.mkdir(uploadsDir, { recursive: true });
+  }
+
   // resume parsing api
   app.post("/resume/parse", upload.none(), async (req, res) => {
     const { text, meta } = req.body as { text?: string; meta?: any };
     if (!text) return res.status(400).json({ error: "resume text required" });
 
-    const schema = buildResumeSchema(text, meta);
-    const score = scoreResume(schema).totalScore;
+    try {
+      let schema = buildResumeSchema(text, meta);
+      
+      // llm enhancement if confidence is low
+      const avgConfidence =
+        schema.skills.length + schema.projects.length + schema.experience.length === 0
+          ? 0
+          : (
+              [schema.skills, schema.projects, schema.experience]
+                .flatMap((arr) => arr.map((item) => item.confidence))
+                .reduce((a, b) => a + b, 0) /
+              Math.max(1, schema.skills.length + schema.projects.length + schema.experience.length)
+            );
 
-    const saved = await prisma.resume.create({
-      data: {
-        id: schema.meta.resumeId,
-        studentId: schema.meta.studentId ?? null,
-        batch: schema.meta.batch ?? null,
-        department: schema.meta.department ?? null,
-        schema: schema as unknown as Prisma.InputJsonValue,
-        score,
-      },
-    });
+      console.log(`[RESUME_PARSE] Confidence: ${avgConfidence.toFixed(2)}, skills=${schema.skills.length}, projects=${schema.projects.length}, experience=${schema.experience.length}`);
 
-    await enqueueResumeEmbeddingJob(saved.id);
+      // if any major section is missing (projects especially), trigger LLM regardless of average confidence
+      const isMissingProjects = schema.projects.length === 0;
+      const shouldEnhance = (avgConfidence < 0.7) || isMissingProjects;
 
-    res.json(saved);
+      if (shouldEnhance) {
+        console.log(`[RESUME_PARSE] Low confidence or missing sections, calling LLM (projects=${schema.projects.length}, confidence=${avgConfidence.toFixed(2)})`);
+        const enhanced = await enhanceSchemaWithLLM(schema, text);
+        if (enhanced) {
+          console.log(`[RESUME_PARSE] LLM enhancement succeeded, updating schema`);
+          schema = enhanced;
+        } else {
+          console.log(`[RESUME_PARSE] LLM enhancement returned null`);
+        }
+      }
+
+      const score = scoreResume(schema).totalScore;
+
+      const saved = await prisma.resume.create({
+        data: {
+          id: schema.meta.resumeId,
+          studentId: schema.meta.studentId ?? null,
+          batch: schema.meta.batch ?? null,
+          department: schema.meta.department ?? null,
+          schema: schema as unknown as Prisma.InputJsonValue,
+          score,
+        },
+      });
+
+      await enqueueResumeEmbeddingJob(saved.id);
+
+      res.json(saved);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "failed to parse resume";
+      console.error("[RESUME_PARSE] Error:", e);
+      res.status(500).json({ error: message });
+    }
   });
 
 
@@ -70,28 +114,88 @@ export function registerResumeRoutes(app: Router): void {
       return res.status(400).json({ error: message });
     }
 
-    const schema = buildResumeSchema(extractedText, meta);
-    const score = scoreResume(schema).totalScore;
+    try {
+      let schema = buildResumeSchema(extractedText, meta);
 
-    const saved = await prisma.resume.create({
-      data: {
-        id: schema.meta.resumeId,
-        studentId: schema.meta.studentId ?? null,
-        batch: schema.meta.batch ?? null,
-        department: schema.meta.department ?? null,
-        schema: schema as unknown as Prisma.InputJsonValue,
-        score,
-      },
-    });
+      // Try LLM enhancement if confidence is low
+      const avgConfidence =
+        schema.skills.length + schema.projects.length + schema.experience.length === 0
+          ? 0
+          : (
+              [schema.skills, schema.projects, schema.experience]
+                .flatMap((arr) => arr.map((item) => item.confidence))
+                .reduce((a, b) => a + b, 0) /
+              Math.max(1, schema.skills.length + schema.projects.length + schema.experience.length)
+            );
 
-    await enqueueResumeEmbeddingJob(saved.id);
+      console.log(`[RESUME_UPLOAD] File: ${file.originalname}, confidence: ${avgConfidence.toFixed(2)}, skills=${schema.skills.length}, projects=${schema.projects.length}, experience=${schema.experience.length}`);
 
-    res.json({
-      ...saved,
-      extraction: {
-        format,
-        textLength: extractedText.length,
-      },
-    });
+      // If any major section is missing (projects especially), trigger LLM regardless of average confidence
+      const isMissingProjects = schema.projects.length === 0;
+      const shouldEnhance = (avgConfidence < 0.7) || isMissingProjects;
+
+      if (shouldEnhance) {
+        console.log(`[RESUME_UPLOAD] Low confidence or missing sections, calling LLM (projects=${schema.projects.length}, confidence=${avgConfidence.toFixed(2)})`);
+        const enhanced = await enhanceSchemaWithLLM(schema, extractedText);
+        if (enhanced) {
+          console.log(`[RESUME_UPLOAD] LLM enhancement succeeded, updating schema`);
+          schema = enhanced;
+        } else {
+          console.log(`[RESUME_UPLOAD] LLM enhancement returned null`);
+        }
+      }
+
+      const score = scoreResume(schema).totalScore;
+
+      await ensureUploadsDir();
+      const safeExt = (() => {
+        const ext = path.extname(file.originalname || "").toLowerCase();
+        if (ext === ".pdf" || ext === ".docx" || ext === ".txt") return ext;
+        if (file.mimetype === "application/pdf") return ".pdf";
+        if (file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return ".docx";
+        if (file.mimetype.startsWith("text/")) return ".txt";
+        return ".bin";
+      })();
+
+      const storedFileName = `${schema.meta.resumeId}${safeExt}`;
+      const relativeFilePath = path.join("uploads", storedFileName);
+      const absoluteFilePath = path.join(uploadsDir, storedFileName);
+
+      try {
+        await fs.writeFile(absoluteFilePath, file.buffer);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "failed to save uploaded file";
+        return res.status(500).json({ error: message });
+      }
+
+      const saved = await prisma.resume.create({
+        data: {
+          id: schema.meta.resumeId,
+          studentId: schema.meta.studentId ?? null,
+          batch: schema.meta.batch ?? null,
+          department: schema.meta.department ?? null,
+          schema: schema as unknown as Prisma.InputJsonValue,
+          score,
+          filePath: relativeFilePath,
+          fileName: file.originalname ?? storedFileName,
+          fileMime: file.mimetype ?? null,
+          fileSize: typeof file.size === "number" ? file.size : null,
+        },
+      });
+
+      await enqueueResumeEmbeddingJob(saved.id);
+
+      res.json({
+        ...saved,
+        extraction: {
+          format,
+          textLength: extractedText.length,
+        },
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "failed to parse resume";
+      console.error("[RESUME_UPLOAD] Error:", e);
+      res.status(500).json({ error: message });
+    }
   });
 }

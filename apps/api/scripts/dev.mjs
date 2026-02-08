@@ -14,7 +14,6 @@ const forwardAndExitCleanly = (signal) => {
   try {
     child.kill(signal);
   } catch {
-    // ignore
   }
 };
 

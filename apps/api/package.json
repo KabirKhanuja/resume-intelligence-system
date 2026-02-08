@@ -6,6 +6,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "db:clear": "tsx scripts/clear-db.ts",
+    "studio": "prisma studio",
+    "resume:reparse": "tsx scripts/reparse-resume.ts",
     "build": "tsc"
   },
   "keywords": [],
@@ -15,16 +18,15 @@
     "@libsql/client": "^0.17.0",
     "@prisma/adapter-libsql": "^7.3.0",
     "@prisma/client": "^7.3.0",
-    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
     "express": "^5.2.1",
     "mammoth": "^1.11.0",
     "multer": "^2.0.2",
-    "pdf-parse": "^2.4.5"
+    "unpdf": "^1.4.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.9",
-    "@types/pdf-parse": "^1.1.5",
     "nodemon": "^3.1.11",
     "prisma": "^7.3.0",
     "tsx": "^4.21.0",

@@ -42,6 +42,9 @@ apps/api/prisma/*.db-journal
 apps/api/prisma/*.sqlite
 apps/api/prisma/*.sqlite-journal
 
+# Uploaded resume files
+apps/api/uploads/
+
 # Python artifacts
 __pycache__/
 **/__pycache__/
@@ -55,6 +58,7 @@ venv/
 #for testing 
 scripts/seed-resumes.ts
 packages/resume-embeddings/src/testEmbed.ts
+scripts/testResume.pdf
 
 # Misc
 .DS_Store

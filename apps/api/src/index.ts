@@ -1,6 +1,32 @@
 import type { Socket } from "node:net";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { config as loadEnv } from "dotenv";
 import { prisma } from "./db.js";
 import { createApp } from "./app.js";
+
+const srcDir = dirname(fileURLToPath(import.meta.url));
+const rootEnvPath = resolve(srcDir, "../../../.env");
+const apiEnvPath = resolve(srcDir, "../.env");
+
+const rootEnvResult = loadEnv({ path: rootEnvPath, override: true });
+const apiEnvResult = loadEnv({ path: apiEnvPath, override: false });
+
+console.log(
+  `[ENV] root .env ${rootEnvResult.error ? "not loaded" : "loaded"} (${rootEnvPath}) | ` +
+    `api .env ${apiEnvResult.error ? "not loaded" : "loaded"} (${apiEnvPath}) | ` +
+    `DATABASE_URL=${process.env.DATABASE_URL ? "set" : "missing"} | ` +
+    `LLM_BASE_URL=${process.env.LLM_BASE_URL ? "set" : "missing"} | ` +
+    `LLM_API_KEY=${process.env.LLM_API_KEY ? "set" : "missing"}`,
+);
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[FATAL] Unhandled promise rejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[FATAL] Uncaught exception:", error);
+});
 
 const app = createApp();
 
@@ -22,7 +48,6 @@ const shutdown = (signal: string) => {
   try {
     console.log(`\nReceived ${signal}. Shutting down...`);
 
-    // here we stop accepting new connections
     server.close(() => undefined);
 
     for (const socket of sockets) socket.destroy();
