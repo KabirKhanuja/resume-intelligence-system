@@ -2,6 +2,11 @@
 
 A comprehensive system for analyzing and ranking student resumes against job descriptions using AI and vector embeddings.
 
+## System Architecture 
+
+<img width="2014" height="1343" alt="solid-diagram" src="https://github.com/user-attachments/assets/0d800ac5-f294-4b1d-aad5-fb7cab3c154f" />
+
+
 ## Project Structure
 
 - **apps/web**: Frontend application (Next.js, React, Tailwind)
